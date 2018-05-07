@@ -4,12 +4,14 @@ import matplotlib.image as mpimg
 from PIL import Image
 import cPickle as pickle
 
-num_image = 1313
-num_class = 15
-img_size = 416.0
-grid_size = 13
+num_image  = 1313
+num_class  = 1
+img_size   = 416.0
+grid_size  = 13
+h_ori      = 480
+w_ori      = 640
 
-root_path = './data/train/'
+root_path = 'data/train/'
 class_path = []
 img_path = []
 
@@ -23,10 +25,8 @@ for i in range(1, num_class+1):
 
 def ctrl_pt_loader(class_index):
     """Load all the control points of one specific class.
-
     Args:
         class_index (int): index of a class (1-15)
-
     Returns:
         2D numpy array: 1313 * 18 
     """
@@ -34,8 +34,6 @@ def ctrl_pt_loader(class_index):
     total_bbx = pickle.load(fr)
     fr.close()
 
-    # x = []
-    # y = []
     crtl_pt = []
     for i in range(0, num_image):
         bbx = total_bbx[str(class_index)]
@@ -44,18 +42,12 @@ def ctrl_pt_loader(class_index):
         centriod = scale * 0.5
         pt = [centriod, centriod]
         for j in range(len(bbx)):
-            # temp_x, temp_y = coordinate_transform(bbx[j][0][0], bbx[j][1][0])
-            temp_x = bbx[j][0][0] * scale * 1.0 / img_size
-            temp_y = bbx[j][1][0] * scale * 1.0 / img_size
+            temp_x = bbx[j][0][0] * scale * 1.0 / w_ori
+            temp_y = bbx[j][1][0] * scale * 1.0 / h_ori
             pt.append(temp_x)
             pt.append(temp_y)
         crtl_pt.append(pt)
-
-            # pt.append(bbx[j][0][0] * 1.0 / h_ori * img_size)
-            # pt.append(bbx[j][1][0] * 1.0 / w_ori * img_size)
-            # x.append(temp_x)
-            # y.append(temp_y)
-            
+        
         # print (pt)
         # test 3D bbx
         # plt.scatter(x,y)
@@ -76,12 +68,10 @@ def ctrl_pt_loader(class_index):
 
 def class_label_grid(class_index, img, pt):
     """Load the 'S X S X number_of_classes' class label grid of image.
-
     Args:
     	class_index (int): index of a class (1-15)
         img: image array
         pt: 2 * 9 point coordinates
-
     Returns:
         2D numpy array: S * S * 19
     """
@@ -98,10 +88,8 @@ def class_label_grid(class_index, img, pt):
 
 def image_loader(class_index):
     """Load all the images of one specific class.
-
     Args:
         class_index (int): index of a class (1-15)
-
     Returns:
         Image - 4D numpy array: 1313 * 3 * 416 * 416
         Grid - 4D numpy array: 1313 * S * S * 19
@@ -111,20 +99,24 @@ def image_loader(class_index):
     image = np.zeros((num_image, 3, int(img_size), int(img_size))) 
     grid = []
     for i in range(0, num_image):
-    	img_name = img_path[class_index - 1]
+    	img_name_base = img_path[class_index - 1]
         if i < 10:
-            img_name = img_name + '000' + str(i) + '.png'
+            img_name = img_name_base + '000' + str(i) + '.png'
         elif i < 100:
-            img_name = img_name + '00' + str(i) + '.png'
+            img_name = img_name_base + '00' + str(i) + '.png'
         elif i < 1000:
-            img_name = img_name + '0' + str(i) + '.png'
+            img_name = img_name_base + '0' + str(i) + '.png'
         else:
-            img_name = img_name + str(i) + '.png'
+            img_name = img_name_base + str(i) + '.png'
+        
+        # do not know why can not read 0556.png, so weird..
+        if i == 374 or i == 566:
+            img_name = img_name_base + '0' + str(i+1) + '.png'
 
         # read image data
-        # img = Image.open(img_name)  # image extension *.png,*.jpg
-        # img = img.resize((int(img_size), int(img_size)), Image.ANTIALIAS)
-        # img.save(img_name)
+        img = Image.open(img_name)
+        img = img.resize((int(img_size), int(img_size)), Image.ANTIALIAS)
+        img.save(img_name)
         img = mpimg.imread(img_name)
         # plt.imshow(img)
         # plt.show()
@@ -142,10 +134,8 @@ def image_loader(class_index):
 
 def total_image_loader(num):
     """Load all the images of all classes.
-
     Args:
         num (int): num of classes (1-15)
-
     Returns:
         Image - 4D numpy array: (num * 1313) * 3 * 416 * 416 
         Grid - 4D numpy array: (num * 1313) * S * S * 19
@@ -154,7 +144,7 @@ def total_image_loader(num):
     total_grid = np.zeros((num_image * num, grid_size, grid_size, 19)) 
     for i in range(0, num):
         print ('Now Loading Class: ' + str(i+1) + '...')
-        image, grid = image_loader(i)
+        image, grid = image_loader(i+1)
         total_image[i * num_image : (i+1) * num_image ,:,:,:] = image
         total_grid[i * num_image : (i+1) * num_image ,:,:,:] = grid
         # total_image.append(image)

@@ -15,12 +15,13 @@ def compute_conf(gx,gy,px,py):
     else:
         return 0
 
-def build_targets(pred_boxes, target, num_anchors, num_classes, nH, nW, noobject_scale, object_scale):
+def build_targets(pred_boxes, target, num_anchors, num_classes, nH, nW, noobject_scale, object_scale, seen):
     nB = target.size(0)
     nA = num_anchors
     nC = num_classes
     # anchor_step = len(anchors)/num_anchors
     conf_mask  = torch.ones(nB, nA, nH, nW) * noobject_scale
+    coor_mask  = torch.zeros(nB, nA, nH, nW)
     cls_mask   = torch.zeros(nB, nA, nH, nW)
     tcls       = torch.zeros(nB, nA, nH, nW) 
     tconf      = torch.zeros(nB, nA, nH, nW)
@@ -45,6 +46,13 @@ def build_targets(pred_boxes, target, num_anchors, num_classes, nH, nW, noobject
 
     nAnchors = nA*nH*nW
     nPixels  = nH*nW
+    
+#     if seen <= 1000:
+#         cur_object_scale = 0
+#     else:
+#         cur_object_scale = object_scale
+    
+    cur_object_scale = 0
 
     for b in xrange(nB):
         for a in xrange(nA):
@@ -53,26 +61,27 @@ def build_targets(pred_boxes, target, num_anchors, num_classes, nH, nW, noobject
                     if target[b][a][h][w][0] != 0:
                         tcls[b][a][h][w]      = target[b][a][h][w][0] 
                         cls_mask[b][a][h][w]  = 1
-                        conf_mask[b][a][h][w] = object_scale
+                        coor_mask[b][a][h][w] = 1
+#                         conf_mask[b][a][h][w] = object_scale
 
-                    gx0 = target[b][a][h][w][1]  * nW
-                    gy0 = target[b][a][h][w][2]  * nH
-                    gx1 = target[b][a][h][w][3]  * nW
-                    gy1 = target[b][a][h][w][4]  * nH
-                    gx2 = target[b][a][h][w][5]  * nW
-                    gy2 = target[b][a][h][w][6]  * nH
-                    gx3 = target[b][a][h][w][7]  * nW
-                    gy3 = target[b][a][h][w][8]  * nH
-                    gx4 = target[b][a][h][w][9]  * nW
-                    gy4 = target[b][a][h][w][10] * nH
-                    gx5 = target[b][a][h][w][11] * nW
-                    gy5 = target[b][a][h][w][12] * nH
-                    gx6 = target[b][a][h][w][13] * nW
-                    gy6 = target[b][a][h][w][14] * nH
-                    gx7 = target[b][a][h][w][15] * nW
-                    gy7 = target[b][a][h][w][16] * nH
-                    gx8 = target[b][a][h][w][17] * nW
-                    gy8 = target[b][a][h][w][18] * nH
+                    gx0 = target[b][a][h][w][1] 
+                    gy0 = target[b][a][h][w][2] 
+                    gx1 = target[b][a][h][w][3] 
+                    gy1 = target[b][a][h][w][4] 
+                    gx2 = target[b][a][h][w][5] 
+                    gy2 = target[b][a][h][w][6] 
+                    gx3 = target[b][a][h][w][7] 
+                    gy3 = target[b][a][h][w][8] 
+                    gx4 = target[b][a][h][w][9] 
+                    gy4 = target[b][a][h][w][10]
+                    gx5 = target[b][a][h][w][11]
+                    gy5 = target[b][a][h][w][12]
+                    gx6 = target[b][a][h][w][13]
+                    gy6 = target[b][a][h][w][14]
+                    gx7 = target[b][a][h][w][15]
+                    gy7 = target[b][a][h][w][16]
+                    gx8 = target[b][a][h][w][17]
+                    gy8 = target[b][a][h][w][18]
 
                     tx0[b][a][h][w] =  gx0 - w 
                     ty0[b][a][h][w] =  gy0 - h 
@@ -107,7 +116,7 @@ def build_targets(pred_boxes, target, num_anchors, num_classes, nH, nW, noobject
                     conf += compute_conf(gx8 - w, gy8 - h, pred_box[16], pred_box[17])
                     tconf[b][a][h][w] = conf/9.0
 
-    return tcls,tconf,cls_mask,conf_mask,tx0,ty0,tx1,ty1,tx2,ty2,tx3,ty3,tx4,ty4,tx5,ty5,tx6,ty6,tx7,ty7,tx8,ty8
+    return tcls,tconf,cls_mask,conf_mask,coor_mask,tx0,ty0,tx1,ty1,tx2,ty2,tx3,ty3,tx4,ty4,tx5,ty5,tx6,ty6,tx7,ty7,tx8,ty8
 
 class RegionLoss(nn.Module):
     def __init__(self, num_classes=0, anchors=[], num_anchors=1):
@@ -119,6 +128,7 @@ class RegionLoss(nn.Module):
         self.noobject_scale = 0.1
         self.object_scale = 5
         self.class_scale = 1
+        self.seen = 0
 
     def forward(self, output, target):
         #output : BxAs*(18+1+num_classes)*H*W
@@ -187,8 +197,8 @@ class RegionLoss(nn.Module):
         pred_boxes = convert2cpu(pred_boxes.transpose(0,1).contiguous().view(-1,18))
         t2 = time.time()
 
-        tcls,tconf,cls_mask,conf_mask,tx0,ty0,tx1,ty1,tx2,ty2,tx3,ty3,tx4,ty4,tx5,ty5,tx6,ty6,tx7,ty7,tx8,ty8 = \
-                        build_targets(pred_boxes, target.data, nA, nC, nH, nW, self.noobject_scale, self.object_scale)
+        tcls,tconf,cls_mask,conf_mask,coor_mask,tx0,ty0,tx1,ty1,tx2,ty2,tx3,ty3,tx4,ty4,tx5,ty5,tx6,ty6,tx7,ty7,tx8,ty8 = \
+                        build_targets(pred_boxes, target.data, nA, nC, nH, nW, self.noobject_scale, self.object_scale, self.seen)
         
         cls_mask = (cls_mask == 1)
         nProposals = int((conf > 0.25).sum().data[0])
@@ -216,35 +226,47 @@ class RegionLoss(nn.Module):
         tcls  = Variable(tcls.view(-1)[cls_mask].long().cuda())
 
         conf_mask  = Variable(conf_mask.cuda())
+        coor_mask  = Variable(coor_mask.cuda())
         cls_mask   = Variable(cls_mask.view(-1, 1).repeat(1,nC).cuda())
         cls        = cls[cls_mask].view(-1, nC)  
         t3 = time.time()
+        
+#         print('----------------x0------------------')
+#         print(x0)
+#         print('----------------tx0-----------------')
+#         print(tx0)
+#         print('----------------x8------------------')
+#         print(x8)
+#         print('----------------tx8-----------------')
+#         print(tx8)
+#         print('----------------coor----------------')
+#         print(coor_mask)
 
-        loss_x0 = self.coord_scale * nn.MSELoss(size_average=False)(x0, tx0)/2.0
-        loss_y0 = self.coord_scale * nn.MSELoss(size_average=False)(y0, ty0)/2.0
-        loss_x1 = self.coord_scale * nn.MSELoss(size_average=False)(x1, tx1)/2.0
-        loss_y1 = self.coord_scale * nn.MSELoss(size_average=False)(y1, ty1)/2.0
-        loss_x2 = self.coord_scale * nn.MSELoss(size_average=False)(x2, tx2)/2.0
-        loss_y2 = self.coord_scale * nn.MSELoss(size_average=False)(y2, ty2)/2.0
-        loss_x3 = self.coord_scale * nn.MSELoss(size_average=False)(x3, tx3)/2.0
-        loss_y3 = self.coord_scale * nn.MSELoss(size_average=False)(y3, ty3)/2.0
-        loss_x4 = self.coord_scale * nn.MSELoss(size_average=False)(x4, tx4)/2.0
-        loss_y4 = self.coord_scale * nn.MSELoss(size_average=False)(y4, ty4)/2.0
-        loss_x5 = self.coord_scale * nn.MSELoss(size_average=False)(x5, tx5)/2.0
-        loss_y5 = self.coord_scale * nn.MSELoss(size_average=False)(y5, ty5)/2.0
-        loss_x6 = self.coord_scale * nn.MSELoss(size_average=False)(x6, tx6)/2.0
-        loss_y6 = self.coord_scale * nn.MSELoss(size_average=False)(y6, ty6)/2.0
-        loss_x7 = self.coord_scale * nn.MSELoss(size_average=False)(x7, tx7)/2.0
-        loss_y7 = self.coord_scale * nn.MSELoss(size_average=False)(y7, ty7)/2.0
-        loss_x8 = self.coord_scale * nn.MSELoss(size_average=False)(x8, tx8)/2.0
-        loss_y8 = self.coord_scale * nn.MSELoss(size_average=False)(y8, ty8)/2.0
+        loss_x0 = self.coord_scale * nn.MSELoss(size_average=False)(x0*coor_mask, tx0*coor_mask)/2.0
+        loss_y0 = self.coord_scale * nn.MSELoss(size_average=False)(y0*coor_mask, ty0*coor_mask)/2.0
+        loss_x1 = self.coord_scale * nn.MSELoss(size_average=False)(x1*coor_mask, tx1*coor_mask)/2.0
+        loss_y1 = self.coord_scale * nn.MSELoss(size_average=False)(y1*coor_mask, ty1*coor_mask)/2.0
+        loss_x2 = self.coord_scale * nn.MSELoss(size_average=False)(x2*coor_mask, tx2*coor_mask)/2.0
+        loss_y2 = self.coord_scale * nn.MSELoss(size_average=False)(y2*coor_mask, ty2*coor_mask)/2.0
+        loss_x3 = self.coord_scale * nn.MSELoss(size_average=False)(x3*coor_mask, tx3*coor_mask)/2.0
+        loss_y3 = self.coord_scale * nn.MSELoss(size_average=False)(y3*coor_mask, ty3*coor_mask)/2.0
+        loss_x4 = self.coord_scale * nn.MSELoss(size_average=False)(x4*coor_mask, tx4*coor_mask)/2.0
+        loss_y4 = self.coord_scale * nn.MSELoss(size_average=False)(y4*coor_mask, ty4*coor_mask)/2.0
+        loss_x5 = self.coord_scale * nn.MSELoss(size_average=False)(x5*coor_mask, tx5*coor_mask)/2.0
+        loss_y5 = self.coord_scale * nn.MSELoss(size_average=False)(y5*coor_mask, ty5*coor_mask)/2.0
+        loss_x6 = self.coord_scale * nn.MSELoss(size_average=False)(x6*coor_mask, tx6*coor_mask)/2.0
+        loss_y6 = self.coord_scale * nn.MSELoss(size_average=False)(y6*coor_mask, ty6*coor_mask)/2.0
+        loss_x7 = self.coord_scale * nn.MSELoss(size_average=False)(x7*coor_mask, tx7*coor_mask)/2.0
+        loss_y7 = self.coord_scale * nn.MSELoss(size_average=False)(y7*coor_mask, ty7*coor_mask)/2.0
+        loss_x8 = self.coord_scale * nn.MSELoss(size_average=False)(x8*coor_mask, tx8*coor_mask)/2.0
+        loss_y8 = self.coord_scale * nn.MSELoss(size_average=False)(y8*coor_mask, ty8*coor_mask)/2.0
 
         loss_conf = nn.MSELoss(size_average=False)(conf*conf_mask, tconf*conf_mask)/2.0
-        loss_cls = self.class_scale * nn.CrossEntropyLoss(size_average=False)(cls, tcls)
+#         loss_cls = self.class_scale * nn.CrossEntropyLoss(size_average=False)(cls, tcls)
 
         loss = loss_x0 + loss_y0 + loss_x1 + loss_y1 + loss_x2 + loss_y2 + loss_x3 + loss_y3 + \
                 loss_x4 + loss_y4 + loss_x5 + loss_y5 + loss_x6 + loss_y6 + loss_x7 +loss_y7 + \
-                loss_x8 + loss_y8 + loss_conf + loss_cls
+                loss_x8 + loss_y8 + loss_conf
         t4 = time.time()
         if True:
             print('-----------------------------------')
@@ -253,5 +275,5 @@ class RegionLoss(nn.Module):
             print('     build targets : %f' % (t3 - t2))
             print('       create loss : %f' % (t4 - t3))
             print('             total : %f' % (t4 - t0))
-        print('%d: nGT %d, recall %d, proposals %d, loss: x %f, y %f, w %f, h %f, conf %f, cls %f, total %f' % (self.seen, nGT, nCorrect, nProposals, loss_x.data[0], loss_y.data[0], loss_w.data[0], loss_h.data[0], loss_conf.data[0], loss_cls.data[0], loss.data[0]))
+        print('%d: loss_x0: %f, y0 %f, x1 %f, y1 %f, x2 %f, y2 %f, x3 %f, y3 %f, x4 %f, y4 %f, x5 %f, y5 %f, x6 %f, y6 %f, x7 %f, y7 %f, x8 %f, y8 %f, conf %f, total %f' % (self.seen, loss_x0.data[0], loss_y0.data[0], loss_x1.data[0], loss_y1.data[0], loss_x2.data[0], loss_y2.data[0], loss_x3.data[0], loss_y3.data[0], loss_x4.data[0], loss_y4.data[0], loss_x5.data[0], loss_y5.data[0], loss_x6.data[0], loss_y6.data[0], loss_x7.data[0], loss_y7.data[0], loss_x8.data[0], loss_y8.data[0], loss_conf.data[0], loss.data[0]))
         return loss
